@@ -62,8 +62,8 @@ Collect trace data from external systems.
 ```javascript
 import axios from 'axios';
 
-const API_BASE = 'http://localhost:3000/api/external';
-const API_KEY = 'your-api-key'; // Optional
+const API_BASE = 'http://external-trace-api-url/api/external';
+const API_KEY = 'your-api-key'; // Require
 
 // Send user message
 async function sendUserMessage(email, message, chatId) {
@@ -594,8 +594,8 @@ export function ChatWindow({ userEmail }: ChatWindowProps) {
 **File: `.env`**
 
 ```bash
-REACT_APP_API_URL=http://localhost:3000
-REACT_APP_TRACE_API_KEY=your-api-key-here
+EXTERNAL_TRACE_API_URL=http://localhost:3000
+EXTERNAL_TRACE_API_KEY=your-api-key-here
 ```
 
 ---

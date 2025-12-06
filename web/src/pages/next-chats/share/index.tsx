@@ -10,11 +10,10 @@ import {
   useFetchExternalChatInfo,
   useFetchNextConversationSSE,
 } from '@/hooks/use-chat-request';
+import { useExternalTrace } from '@/hooks/useExternalTrace';
 import i18n from '@/locales/config';
 import { buildMessageUuidWithRole } from '@/utils/chat';
-import axios from 'axios';
 import React, { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'umi';
 import { v4 as uuidv4 } from 'uuid';
 import { useSendButtonDisabled } from '../hooks/use-button-disabled';
 import {
@@ -30,7 +29,11 @@ const ChatContainer = () => {
     locale,
     theme,
     visibleAvatar,
+    email,
   } = useGetSharedChatSearchParams();
+
+  console.log('[Debug] ChatContainer:', { email, conversationId });
+
   useSyncThemeFromParams(theme);
   const { visible, hideModal, documentId, selectedChunk, clickDocumentButton } =
     useClickDrawer();
@@ -49,46 +52,21 @@ const ChatContainer = () => {
   } = useSendSharedMessage();
   const sendDisabled = useSendButtonDisabled(value);
   const { data: chatInfo } = useFetchExternalChatInfo();
-  const [searchParams] = useSearchParams();
-  const [traceId, setTraceId] = useState<string>(uuidv4());
   const [lastQuestion, setLastQuestion] = useState<string>('');
   const prevSendLoading = useRef(false);
 
   // Get user ID (email) from URL params
-  const email =
-    searchParams.get('email') || searchParams.get('user_id') || 'anonymous';
-
-  const sendTrace = async (
-    role: 'user' | 'assistant',
-    messageContent: string,
-    responseContent: string | null = null,
-  ) => {
-    try {
-      const apiUrl =
-        process.env.EXTERNAL_TRACE_API_URL ||
-        process.env.EXTERNAL_TRACE_URL ||
-        '/api/external/trace';
-      await axios.post(apiUrl, {
-        email,
-        message: messageContent,
-        role,
-        response: responseContent,
-        metadata: {
-          chatId: conversationId || 'unknown',
-          traceId,
-          source: 'next-chats-share',
-        },
-      });
-    } catch (e) {
-      console.error('Failed to send trace:', e);
-    }
-  };
+  const { traceUserMessage, traceAssistantResponse, setLastTraceId } =
+    useExternalTrace({
+      email,
+      chatId: conversationId || 'unknown',
+    });
 
   const handlePressEnterWrapped = (documentIds: string[]) => {
     const currentQuestion = value;
     setLastQuestion(currentQuestion);
     handlePressEnter(documentIds);
-    sendTrace('user', currentQuestion);
+    traceUserMessage(currentQuestion);
   };
 
   useEffect(() => {
@@ -100,7 +78,7 @@ const ChatContainer = () => {
     ) {
       const lastMsg = derivedMessages[derivedMessages.length - 1];
       if (lastMsg.role === MessageType.Assistant) {
-        sendTrace('assistant', lastQuestion, lastMsg.content);
+        traceAssistantResponse(lastQuestion, lastMsg.content);
       }
     }
     prevSendLoading.current = sendLoading;
@@ -108,7 +86,7 @@ const ChatContainer = () => {
 
   const handleReset = () => {
     removeAllMessagesExceptFirst();
-    setTraceId(uuidv4());
+    setLastTraceId(uuidv4());
   };
 
   const useFetchAvatar = useMemo(() => {
