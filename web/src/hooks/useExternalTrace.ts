@@ -12,13 +12,13 @@ export function useExternalTrace({ email, chatId }: UseExternalTraceOptions) {
 
   const traceUserMessage = useCallback(
     async (message: string) => {
-      console.log('[Debug] traceUserMessage:', { message, email, chatId });
       setIsTracing(true);
       try {
         const result = await externalTraceApi.sendUserMessage(
           email,
           message,
           chatId,
+          lastTraceId || undefined,
         );
         if (result.traceId) setLastTraceId(result.traceId);
         return result;
@@ -26,7 +26,7 @@ export function useExternalTrace({ email, chatId }: UseExternalTraceOptions) {
         setIsTracing(false);
       }
     },
-    [email, chatId],
+    [email, chatId, lastTraceId],
   );
 
   const traceAssistantResponse = useCallback(
@@ -36,14 +36,6 @@ export function useExternalTrace({ email, chatId }: UseExternalTraceOptions) {
       model?: string,
       usage?: { promptTokens?: number; completionTokens?: number },
     ) => {
-      console.log('[Debug] traceAssistantResponse:', {
-        message,
-        response,
-        model,
-        usage,
-        email,
-        chatId,
-      });
       setIsTracing(true);
       try {
         const result = await externalTraceApi.sendAssistantResponse(
@@ -53,14 +45,15 @@ export function useExternalTrace({ email, chatId }: UseExternalTraceOptions) {
           chatId,
           model,
           usage,
+          lastTraceId || undefined,
         );
-        if (result.traceId) setLastTraceId(result.traceId);
+        if (result.traceId && !lastTraceId) setLastTraceId(result.traceId);
         return result;
       } finally {
         setIsTracing(false);
       }
     },
-    [email, chatId],
+    [email, chatId, lastTraceId],
   );
 
   return {

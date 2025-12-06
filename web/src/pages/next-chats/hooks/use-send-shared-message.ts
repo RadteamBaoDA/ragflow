@@ -29,15 +29,6 @@ export const useGetSharedChatSearchParams = () => {
       .filter(([key]) => key.startsWith(data_prefix))
       .map(([key, value]) => [key.replace(data_prefix, ''), value]),
   );
-
-  const email =
-    searchParams.get('email') || searchParams.get('user_id') || 'anonymous';
-  console.log('[Debug] useGetSharedChatSearchParams:', {
-    from: searchParams.get('from'),
-    sharedId: searchParams.get('shared_id'),
-    email,
-  });
-
   return {
     from: searchParams.get('from') as SharedFrom,
     sharedId: searchParams.get('shared_id'),

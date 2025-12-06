@@ -32,8 +32,6 @@ const ChatContainer = () => {
     email,
   } = useGetSharedChatSearchParams();
 
-  console.log('[Debug] ChatContainer:', { email, conversationId });
-
   useSyncThemeFromParams(theme);
   const { visible, hideModal, documentId, selectedChunk, clickDocumentButton } =
     useClickDrawer();
@@ -54,12 +52,14 @@ const ChatContainer = () => {
   const { data: chatInfo } = useFetchExternalChatInfo();
   const [lastQuestion, setLastQuestion] = useState<string>('');
   const prevSendLoading = useRef(false);
+  const pendingTrace = useRef(false);
 
   // Get user ID (email) from URL params
+  const [internalChatId, setInternalChatId] = useState<string>(uuidv4());
   const { traceUserMessage, traceAssistantResponse, setLastTraceId } =
     useExternalTrace({
       email,
-      chatId: conversationId || 'unknown',
+      chatId: internalChatId,
     });
 
   const handlePressEnterWrapped = (documentIds: string[]) => {
@@ -70,23 +70,41 @@ const ChatContainer = () => {
   };
 
   useEffect(() => {
-    if (
-      !sendLoading &&
-      prevSendLoading.current &&
-      derivedMessages &&
-      derivedMessages.length > 0
-    ) {
-      const lastMsg = derivedMessages[derivedMessages.length - 1];
-      if (lastMsg.role === MessageType.Assistant) {
-        traceAssistantResponse(lastQuestion, lastMsg.content);
+    if (sendLoading) {
+      pendingTrace.current = false;
+    }
+
+    const justFinished = !sendLoading && prevSendLoading.current;
+    if (justFinished || (pendingTrace.current && !sendLoading)) {
+      if (derivedMessages && derivedMessages.length > 0) {
+        const lastMsg = derivedMessages[derivedMessages.length - 1];
+        if (lastMsg.role === MessageType.Assistant) {
+          console.log('[Debug] useEffect triggering traceAssistantResponse:', {
+            lastQuestion,
+            lastMsg,
+          });
+          traceAssistantResponse(lastQuestion, lastMsg.content);
+          pendingTrace.current = false;
+        } else if (justFinished) {
+          console.log(
+            '[Debug] Finished loading but assistant msg missing, setting pending',
+          );
+          pendingTrace.current = true;
+        }
+      } else if (justFinished) {
+        console.log(
+          '[Debug] Finished loading but no messages, setting pending',
+        );
+        pendingTrace.current = true;
       }
     }
     prevSendLoading.current = sendLoading;
-  }, [sendLoading, derivedMessages, lastQuestion]);
+  }, [sendLoading, derivedMessages, lastQuestion, traceAssistantResponse]);
 
   const handleReset = () => {
     removeAllMessagesExceptFirst();
     setLastTraceId(uuidv4());
+    setInternalChatId(uuidv4());
   };
 
   const useFetchAvatar = useMemo(() => {
@@ -122,6 +140,7 @@ const ChatContainer = () => {
           >
             <div>
               {derivedMessages?.map((message, i) => {
+                console.log('[Debug] MessageItem:', message);
                 return (
                   <MessageItem
                     visibleAvatar={visibleAvatar}
