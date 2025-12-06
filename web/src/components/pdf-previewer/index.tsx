@@ -1,7 +1,8 @@
 import { IReferenceChunk } from '@/interfaces/database/chat';
 import { IChunk } from '@/interfaces/database/knowledge';
 import FileError from '@/pages/document-viewer/file-error';
-import { Skeleton } from 'antd';
+import { ZoomInOutlined, ZoomOutOutlined } from '@ant-design/icons';
+import { Button, Skeleton, Space } from 'antd';
 import { useEffect, useRef, useState } from 'react';
 import {
   AreaHighlight,
@@ -41,6 +42,7 @@ const DocumentPreviewer = ({ chunk, documentId, visible }: IProps) => {
   const { highlights: state, setWidthAndHeight } = useGetChunkHighlights(chunk);
   const ref = useRef<(highlight: IHighlight) => void>(() => {});
   const [loaded, setLoaded] = useState(false);
+  const [scale, setScale] = useState(1);
   const url = getDocumentUrl();
   const error = useCatchDocumentError(url);
 
@@ -57,6 +59,14 @@ const DocumentPreviewer = ({ chunk, documentId, visible }: IProps) => {
     }
   }, [state, loaded]);
 
+  const handleZoomIn = () => {
+    setScale((prev) => prev + 0.25);
+  };
+
+  const handleZoomOut = () => {
+    setScale((prev) => (prev > 0.5 ? prev - 0.25 : prev));
+  };
+
   return (
     <div className={styles.documentContainer}>
       <PdfLoader
@@ -67,7 +77,7 @@ const DocumentPreviewer = ({ chunk, documentId, visible }: IProps) => {
       >
         {(pdfDocument) => {
           pdfDocument.getPage(1).then((page) => {
-            const viewport = page.getViewport({ scale: 1 });
+            const viewport = page.getViewport({ scale });
             const width = viewport.width;
             const height = viewport.height;
             setWidthAndHeight(width, height);
@@ -75,6 +85,7 @@ const DocumentPreviewer = ({ chunk, documentId, visible }: IProps) => {
 
           return (
             <PdfHighlighter
+              pdfScaleValue={scale.toString()}
               pdfDocument={pdfDocument}
               enableAreaSelection={(event) => event.altKey}
               onScrollChange={resetHash}
@@ -128,6 +139,20 @@ const DocumentPreviewer = ({ chunk, documentId, visible }: IProps) => {
           );
         }}
       </PdfLoader>
+      <div className={styles.zoomContainer}>
+        <Space direction="vertical">
+          <Button
+            icon={<ZoomInOutlined />}
+            onClick={handleZoomIn}
+            size="small"
+          />
+          <Button
+            icon={<ZoomOutOutlined />}
+            onClick={handleZoomOut}
+            size="small"
+          />
+        </Space>
+      </div>
     </div>
   );
 };

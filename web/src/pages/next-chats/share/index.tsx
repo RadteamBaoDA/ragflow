@@ -12,7 +12,10 @@ import {
 } from '@/hooks/use-chat-request';
 import i18n from '@/locales/config';
 import { buildMessageUuidWithRole } from '@/utils/chat';
-import React, { forwardRef, useMemo } from 'react';
+import axios from 'axios';
+import React, { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'umi';
+import { v4 as uuidv4 } from 'uuid';
 import { useSendButtonDisabled } from '../hooks/use-button-disabled';
 import {
   useGetSharedChatSearchParams,
@@ -46,6 +49,67 @@ const ChatContainer = () => {
   } = useSendSharedMessage();
   const sendDisabled = useSendButtonDisabled(value);
   const { data: chatInfo } = useFetchExternalChatInfo();
+  const [searchParams] = useSearchParams();
+  const [traceId, setTraceId] = useState<string>(uuidv4());
+  const [lastQuestion, setLastQuestion] = useState<string>('');
+  const prevSendLoading = useRef(false);
+
+  // Get user ID (email) from URL params
+  const email =
+    searchParams.get('email') || searchParams.get('user_id') || 'anonymous';
+
+  const sendTrace = async (
+    role: 'user' | 'assistant',
+    messageContent: string,
+    responseContent: string | null = null,
+  ) => {
+    try {
+      const apiUrl =
+        process.env.EXTERNAL_TRACE_API_URL ||
+        process.env.EXTERNAL_TRACE_URL ||
+        '/api/external/trace';
+      await axios.post(apiUrl, {
+        email,
+        message: messageContent,
+        role,
+        response: responseContent,
+        metadata: {
+          chatId: conversationId || 'unknown',
+          traceId,
+          source: 'next-chats-share',
+        },
+      });
+    } catch (e) {
+      console.error('Failed to send trace:', e);
+    }
+  };
+
+  const handlePressEnterWrapped = (documentIds: string[]) => {
+    const currentQuestion = value;
+    setLastQuestion(currentQuestion);
+    handlePressEnter(documentIds);
+    sendTrace('user', currentQuestion);
+  };
+
+  useEffect(() => {
+    if (
+      !sendLoading &&
+      prevSendLoading.current &&
+      derivedMessages &&
+      derivedMessages.length > 0
+    ) {
+      const lastMsg = derivedMessages[derivedMessages.length - 1];
+      if (lastMsg.role === MessageType.Assistant) {
+        sendTrace('assistant', lastQuestion, lastMsg.content);
+      }
+    }
+    prevSendLoading.current = sendLoading;
+  }, [sendLoading, derivedMessages, lastQuestion]);
+
+  const handleReset = () => {
+    removeAllMessagesExceptFirst();
+    setTraceId(uuidv4());
+  };
 
   const useFetchAvatar = useMemo(() => {
     return from === SharedFrom.Agent
@@ -69,7 +133,7 @@ const ChatContainer = () => {
       <EmbedContainer
         title={chatInfo.title}
         avatar={chatInfo.avatar}
-        handleReset={removeAllMessagesExceptFirst}
+        handleReset={handleReset}
       >
         <div className="flex flex-1 flex-col p-2.5  h-[90vh] m-3">
           <div
@@ -118,7 +182,7 @@ const ChatContainer = () => {
                 sendDisabled={sendDisabled}
                 conversationId={conversationId}
                 onInputChange={handleInputChange}
-                onPressEnter={handlePressEnter}
+                onPressEnter={handlePressEnterWrapped}
                 sendLoading={sendLoading}
                 uploadMethod="external_upload_and_parse"
                 showUploadIcon={false}
@@ -134,6 +198,7 @@ const ChatContainer = () => {
           hideModal={hideModal}
           documentId={documentId}
           chunk={selectedChunk}
+          width={'90vw'}
         ></PdfSheet>
       )}
     </>

@@ -17,7 +17,7 @@ export const PdfSheet = ({
   hideModal,
   documentId,
   chunk,
-  width = '50vw',
+  width = '90vw',
   height,
 }: IProps) => {
   return (

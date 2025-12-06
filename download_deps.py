@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
 
-# PEP 723 metadata
-# /// script
-# requires-python = ">=3.10"
-# dependencies = [
-#   "nltk",
-# ]
-# ///
 
 import argparse
 import os
