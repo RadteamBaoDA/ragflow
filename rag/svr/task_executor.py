@@ -113,13 +113,40 @@ CURRENT_TASKS = {}
 MAX_CONCURRENT_TASKS = int(os.environ.get('MAX_CONCURRENT_TASKS', "5"))
 MAX_CONCURRENT_CHUNK_BUILDERS = int(os.environ.get('MAX_CONCURRENT_CHUNK_BUILDERS', "1"))
 MAX_CONCURRENT_MINIO = int(os.environ.get('MAX_CONCURRENT_MINIO', '10'))
+MAX_CONCURRENT_DOC_STORE = int(os.environ.get('MAX_CONCURRENT_DOC_STORE', '3'))
+# Limit thread pool size to prevent resource exhaustion
+# Default 0 means use Python's default (min(32, os.cpu_count() + 4))
+MAX_THREAD_WORKERS = int(os.environ.get('MAX_THREAD_WORKERS', '0'))
+
 task_limiter = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
 chunk_limiter = asyncio.Semaphore(MAX_CONCURRENT_CHUNK_BUILDERS)
 embed_limiter = asyncio.Semaphore(MAX_CONCURRENT_CHUNK_BUILDERS)
 minio_limiter = asyncio.Semaphore(MAX_CONCURRENT_MINIO)
+docstore_limiter = asyncio.Semaphore(MAX_CONCURRENT_DOC_STORE)
 kg_limiter = asyncio.Semaphore(2)
 WORKER_HEARTBEAT_TIMEOUT = int(os.environ.get('WORKER_HEARTBEAT_TIMEOUT', '120'))
 stop_event = threading.Event()
+
+# Global thread pool executor with controlled size to prevent resource exhaustion
+_thread_pool_executor = None
+
+def get_thread_pool_executor():
+    """Get or create the global thread pool executor with controlled size."""
+    global _thread_pool_executor
+    if _thread_pool_executor is None:
+        if MAX_THREAD_WORKERS > 0:
+            _thread_pool_executor = concurrent.futures.ThreadPoolExecutor(
+                max_workers=MAX_THREAD_WORKERS,
+                thread_name_prefix="task_executor_pool"
+            )
+            logging.info(f"Created thread pool with {MAX_THREAD_WORKERS} workers")
+        else:
+            # Use default size but still create a shared pool
+            _thread_pool_executor = concurrent.futures.ThreadPoolExecutor(
+                thread_name_prefix="task_executor_pool"
+            )
+            logging.info("Created thread pool with default worker count")
+    return _thread_pool_executor
 
 
 def signal_handler(sig, frame):
@@ -280,22 +307,23 @@ async def build_chunks(task, progress_callback):
 
     @timeout(60)
     async def upload_to_minio(document, chunk):
-        try:
-            d = copy.deepcopy(document)
-            d.update(chunk)
-            d["id"] = xxhash.xxh64((chunk["content_with_weight"] + str(d["doc_id"])).encode("utf-8", "surrogatepass")).hexdigest()
-            d["create_time"] = str(datetime.now()).replace("T", " ")[:19]
-            d["create_timestamp_flt"] = datetime.now().timestamp()
-            if not d.get("image"):
-                _ = d.pop("image", None)
-                d["img_id"] = ""
+        async with minio_limiter:  # Limit concurrent minio operations
+            try:
+                d = copy.deepcopy(document)
+                d.update(chunk)
+                d["id"] = xxhash.xxh64((chunk["content_with_weight"] + str(d["doc_id"])).encode("utf-8", "surrogatepass")).hexdigest()
+                d["create_time"] = str(datetime.now()).replace("T", " ")[:19]
+                d["create_timestamp_flt"] = datetime.now().timestamp()
+                if not d.get("image"):
+                    _ = d.pop("image", None)
+                    d["img_id"] = ""
+                    docs.append(d)
+                    return
+                await image2id(d, partial(settings.STORAGE_IMPL.put, tenant_id=task["tenant_id"]), d["id"], task["kb_id"])
                 docs.append(d)
-                return
-            await image2id(d, partial(settings.STORAGE_IMPL.put, tenant_id=task["tenant_id"]), d["id"], task["kb_id"])
-            docs.append(d)
-        except Exception:
-            logging.exception(
-                "Saving image of chunk {}/{}/{} got exception".format(task["location"], task["name"], d["id"]))
+            except Exception:
+                logging.exception(
+                    "Saving image of chunk {}/{}/{} got exception".format(task["location"], task["name"], d["id"]))
             raise
 
     tasks = []
@@ -797,14 +825,16 @@ async def insert_es(task_id, task_tenant_id, task_dataset_id, chunks, progress_c
         mothers.append(mom_ck)
 
     for b in range(0, len(mothers), settings.DOC_BULK_SIZE):
-        await asyncio.to_thread(settings.docStoreConn.insert,mothers[b:b + settings.DOC_BULK_SIZE],search.index_name(task_tenant_id),task_dataset_id,)
+        async with docstore_limiter:  # Limit concurrent doc store operations
+            await asyncio.to_thread(settings.docStoreConn.insert,mothers[b:b + settings.DOC_BULK_SIZE],search.index_name(task_tenant_id),task_dataset_id,)
         task_canceled = has_canceled(task_id)
         if task_canceled:
             progress_callback(-1, msg="Task has been canceled.")
             return False
 
     for b in range(0, len(chunks), settings.DOC_BULK_SIZE):
-        doc_store_result = await asyncio.to_thread(settings.docStoreConn.insert,chunks[b:b + settings.DOC_BULK_SIZE],search.index_name(task_tenant_id),task_dataset_id,)
+        async with docstore_limiter:  # Limit concurrent doc store operations
+            doc_store_result = await asyncio.to_thread(settings.docStoreConn.insert,chunks[b:b + settings.DOC_BULK_SIZE],search.index_name(task_tenant_id),task_dataset_id,)
         task_canceled = has_canceled(task_id)
         if task_canceled:
             progress_callback(-1, msg="Task has been canceled.")
@@ -821,7 +851,8 @@ async def insert_es(task_id, task_tenant_id, task_dataset_id, chunks, progress_c
             TaskService.update_chunk_ids(task_id, chunk_ids_str)
         except DoesNotExist:
             logging.warning(f"do_handle_task update_chunk_ids failed since task {task_id} is unknown.")
-            doc_store_result = await asyncio.to_thread(settings.docStoreConn.delete,{"id": chunk_ids},search.index_name(task_tenant_id),task_dataset_id,)
+            async with docstore_limiter:
+                doc_store_result = await asyncio.to_thread(settings.docStoreConn.delete,{"id": chunk_ids},search.index_name(task_tenant_id),task_dataset_id,)
             tasks = []
             for chunk_id in chunk_ids:
                 tasks.append(asyncio.create_task(delete_image(task_dataset_id, chunk_id)))
@@ -859,7 +890,8 @@ async def do_handle_task(task):
     task_parser_config = task["parser_config"]
     task_start_ts = timer()
     toc_thread = None
-    executor = concurrent.futures.ThreadPoolExecutor()
+    # Use the global thread pool instead of creating a new one per task
+    executor = get_thread_pool_executor()
 
     # prepare the progress callback function
     progress_callback = partial(set_progress, task_id, task_from_page, task_to_page)
@@ -1219,11 +1251,37 @@ async def main():
           /____/
     """)
     logging.info(f'RAGFlow version: {get_ragflow_version()}')
-    show_configs()
+    
+    # Initialize settings FIRST before showing configs
     settings.init_settings()
     settings.check_and_install_torch()
+    
+    # Now show configs after settings are initialized
+    show_configs()
     logging.info(f'default embedding config: {settings.EMBEDDING_CFG}')
     settings.print_rag_settings()
+    
+    # Log executor-specific settings for debugging resource issues
+    settings.print_executor_settings()
+    
+    # Log local executor concurrency settings
+    logging.info(f"Local executor concurrency limits:")
+    logging.info(f"  task_limiter (MAX_CONCURRENT_TASKS): {MAX_CONCURRENT_TASKS}")
+    logging.info(f"  chunk_limiter (MAX_CONCURRENT_CHUNK_BUILDERS): {MAX_CONCURRENT_CHUNK_BUILDERS}")
+    logging.info(f"  embed_limiter (MAX_CONCURRENT_CHUNK_BUILDERS): {MAX_CONCURRENT_CHUNK_BUILDERS}")
+    logging.info(f"  minio_limiter (MAX_CONCURRENT_MINIO): {MAX_CONCURRENT_MINIO}")
+    logging.info(f"  docstore_limiter (MAX_CONCURRENT_DOC_STORE): {MAX_CONCURRENT_DOC_STORE}")
+    logging.info(f"  kg_limiter: 2 (hardcoded)")
+    logging.info(f"  MAX_THREAD_WORKERS: {MAX_THREAD_WORKERS} (0=auto)")
+    
+    # Initialize the shared thread pool
+    get_thread_pool_executor()
+    
+    # Set the thread pool as the default executor for asyncio.to_thread
+    loop = asyncio.get_running_loop()
+    loop.set_default_executor(get_thread_pool_executor())
+    logging.info("Set custom thread pool as default executor for asyncio.to_thread")
+    
     if sys.platform != "win32":
         signal.signal(signal.SIGUSR1, start_tracemalloc_and_snapshot)
         signal.signal(signal.SIGUSR2, stop_tracemalloc)
@@ -1242,6 +1300,11 @@ async def main():
             t = asyncio.create_task(task_manager())
             tasks.append(t)
     finally:
+        # Cleanup: shutdown thread pool
+        executor = get_thread_pool_executor()
+        if executor:
+            logging.info("Shutting down thread pool executor...")
+            executor.shutdown(wait=False, cancel_futures=True)
         for t in tasks:
             t.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)

@@ -378,3 +378,46 @@ def print_rag_settings():
     logging.info(f"MAX_CONTENT_LENGTH: {DOC_MAXIMUM_SIZE}")
     logging.info(f"MAX_FILE_COUNT_PER_USER: {int(os.environ.get('MAX_FILE_NUM_PER_USER', 0))}")
 
+
+def print_executor_settings():
+    """Log all executor-related settings for debugging resource control issues."""
+    logging.info("="*60)
+    logging.info("TASK EXECUTOR RESOURCE CONTROL SETTINGS")
+    logging.info("="*60)
+    
+    # Document processing settings
+    logging.info(f"DOC_BULK_SIZE: {DOC_BULK_SIZE} (env: DOC_BULK_SIZE, default: 4)")
+    logging.info(f"EMBEDDING_BATCH_SIZE: {EMBEDDING_BATCH_SIZE} (env: EMBEDDING_BATCH_SIZE, default: 16)")
+    logging.info(f"DOC_MAXIMUM_SIZE: {DOC_MAXIMUM_SIZE} bytes ({DOC_MAXIMUM_SIZE // (1024*1024)} MB)")
+    
+    # Concurrency settings from environment
+    max_concurrent_tasks = int(os.environ.get('MAX_CONCURRENT_TASKS', '5'))
+    max_concurrent_chunk_builders = int(os.environ.get('MAX_CONCURRENT_CHUNK_BUILDERS', '1'))
+    max_concurrent_minio = int(os.environ.get('MAX_CONCURRENT_MINIO', '10'))
+    max_concurrent_doc_store = int(os.environ.get('MAX_CONCURRENT_DOC_STORE', '3'))
+    max_thread_workers = int(os.environ.get('MAX_THREAD_WORKERS', '0'))  # 0 means default
+    
+    logging.info(f"MAX_CONCURRENT_TASKS: {max_concurrent_tasks} (env: MAX_CONCURRENT_TASKS, default: 5)")
+    logging.info(f"MAX_CONCURRENT_CHUNK_BUILDERS: {max_concurrent_chunk_builders} (env: MAX_CONCURRENT_CHUNK_BUILDERS, default: 1)")
+    logging.info(f"MAX_CONCURRENT_MINIO: {max_concurrent_minio} (env: MAX_CONCURRENT_MINIO, default: 10)")
+    logging.info(f"MAX_CONCURRENT_DOC_STORE: {max_concurrent_doc_store} (env: MAX_CONCURRENT_DOC_STORE, default: 3)")
+    logging.info(f"MAX_THREAD_WORKERS: {max_thread_workers} (env: MAX_THREAD_WORKERS, default: 0=auto)")
+    
+    # Worker settings
+    worker_heartbeat_timeout = int(os.environ.get('WORKER_HEARTBEAT_TIMEOUT', '120'))
+    logging.info(f"WORKER_HEARTBEAT_TIMEOUT: {worker_heartbeat_timeout}s")
+    
+    # Memory/trace settings
+    trace_malloc = int(os.environ.get('TRACE_MALLOC_ENABLED', '0'))
+    logging.info(f"TRACE_MALLOC_ENABLED: {trace_malloc}")
+    
+    logging.info("="*60)
+    logging.info("To reduce server load, set lower values for:")
+    logging.info("  - MAX_CONCURRENT_TASKS (fewer parallel tasks)")
+    logging.info("  - MAX_CONCURRENT_CHUNK_BUILDERS (fewer parallel chunk/embed ops)")
+    logging.info("  - MAX_CONCURRENT_DOC_STORE (fewer parallel ES/Infinity ops)")
+    logging.info("  - DOC_BULK_SIZE (smaller batches for doc store inserts)")
+    logging.info("  - EMBEDDING_BATCH_SIZE (smaller batches for embeddings)")
+    logging.info("  - MAX_THREAD_WORKERS (limit thread pool size)")
+    logging.info("="*60)
+

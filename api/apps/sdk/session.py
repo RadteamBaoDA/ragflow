@@ -13,6 +13,7 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 #
+import asyncio
 import json
 import copy
 import re
@@ -1111,13 +1112,18 @@ async def retrieval_test_embedded():
             _question += await keyword_extraction(chat_mdl, _question)
 
         labels = label_question(_question, [kb])
-        ranks = settings.retriever.retrieval(
+        # Use asyncio.to_thread to avoid blocking the event loop
+        ranks = await asyncio.to_thread(
+            settings.retriever.retrieval,
             _question, embd_mdl, tenant_ids, kb_ids, page, size, similarity_threshold, vector_similarity_weight, top,
             local_doc_ids, rerank_mdl=rerank_mdl, highlight=req.get("highlight"), rank_feature=labels
         )
         if use_kg:
-            ck = settings.kg_retriever.retrieval(_question, tenant_ids, kb_ids, embd_mdl,
-                                                 LLMBundle(kb.tenant_id, LLMType.CHAT))
+            ck = await asyncio.to_thread(
+                settings.kg_retriever.retrieval,
+                _question, tenant_ids, kb_ids, embd_mdl,
+                LLMBundle(kb.tenant_id, LLMType.CHAT)
+            )
             if ck["content_with_weight"]:
                 ranks["chunks"].insert(0, ck)
 

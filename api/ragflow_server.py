@@ -146,7 +146,23 @@ if __name__ == '__main__':
     # start http server
     try:
         logging.info("RAGFlow HTTP server start...")
-        app.run(host=settings.HOST_IP, port=settings.HOST_PORT)
+        if RuntimeConfig.DEBUG:
+            # Use Quart's built-in server for debug mode
+            app.run(host=settings.HOST_IP, port=settings.HOST_PORT)
+        else:
+            # Use Hypercorn for production with proper async support
+            import asyncio
+            from hypercorn.config import Config
+            from hypercorn.asyncio import serve
+
+            config = Config()
+            config.bind = [f"{settings.HOST_IP}:{settings.HOST_PORT}"]
+            # Configure worker settings for better concurrency
+            config.workers = int(os.environ.get("RAGFLOW_WORKERS", 1))
+            config.keep_alive_timeout = 600  # Match LLM timeout settings
+            config.graceful_timeout = 30
+
+            asyncio.run(serve(app, config))
     except Exception:
         traceback.print_exc()
         stop_event.set()

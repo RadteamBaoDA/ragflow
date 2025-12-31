@@ -13,6 +13,7 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 #
+import asyncio
 import binascii
 import logging
 import re
@@ -395,7 +396,9 @@ async def async_chat(dialog, messages, stream=True, **kwargs):
                     yield think
         else:
             if embd_mdl:
-                kbinfos = retriever.retrieval(
+                # Use asyncio.to_thread to avoid blocking the event loop during retrieval
+                kbinfos = await asyncio.to_thread(
+                    retriever.retrieval,
                     " ".join(questions),
                     embd_mdl,
                     tenant_ids,
@@ -411,18 +414,26 @@ async def async_chat(dialog, messages, stream=True, **kwargs):
                     rank_feature=label_question(" ".join(questions), kbs),
                 )
                 if prompt_config.get("toc_enhance"):
-                    cks = retriever.retrieval_by_toc(" ".join(questions), kbinfos["chunks"], tenant_ids, chat_mdl, dialog.top_n)
+                    cks = await asyncio.to_thread(
+                        retriever.retrieval_by_toc,
+                        " ".join(questions), kbinfos["chunks"], tenant_ids, chat_mdl, dialog.top_n
+                    )
                     if cks:
                         kbinfos["chunks"] = cks
-                kbinfos["chunks"] = retriever.retrieval_by_children(kbinfos["chunks"], tenant_ids)
+                kbinfos["chunks"] = await asyncio.to_thread(
+                    retriever.retrieval_by_children, kbinfos["chunks"], tenant_ids
+                )
             if prompt_config.get("tavily_api_key"):
                 tav = Tavily(prompt_config["tavily_api_key"])
-                tav_res = tav.retrieve_chunks(" ".join(questions))
+                tav_res = await asyncio.to_thread(tav.retrieve_chunks, " ".join(questions))
                 kbinfos["chunks"].extend(tav_res["chunks"])
                 kbinfos["doc_aggs"].extend(tav_res["doc_aggs"])
             if prompt_config.get("use_kg"):
-                ck = settings.kg_retriever.retrieval(" ".join(questions), tenant_ids, dialog.kb_ids, embd_mdl,
-                                                       LLMBundle(dialog.tenant_id, LLMType.CHAT))
+                ck = await asyncio.to_thread(
+                    settings.kg_retriever.retrieval,
+                    " ".join(questions), tenant_ids, dialog.kb_ids, embd_mdl,
+                    LLMBundle(dialog.tenant_id, LLMType.CHAT)
+                )
                 if ck["content_with_weight"]:
                     kbinfos["chunks"].insert(0, ck)
 

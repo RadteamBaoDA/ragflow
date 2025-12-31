@@ -117,6 +117,33 @@ The [.env](./.env) file contains important environment variables for Docker.
 - `EMBEDDING_BATCH_SIZE`  
   The number of text chunks processed in a single batch during embedding vectorization. Defaults to `16`.
 
+### Concurrency control (important for preventing server overload)
+
+- `MAX_CONCURRENT_TASKS`  
+  Maximum number of concurrent document parsing tasks per executor worker. Defaults to `5`. Lower this if the server becomes unresponsive.
+
+- `MAX_CONCURRENT_CHUNK_BUILDERS`  
+  Maximum number of concurrent chunking and embedding operations. Defaults to `1`. This is the most memory-intensive operation.
+
+- `MAX_CONCURRENT_MINIO`  
+  Maximum number of concurrent MinIO/storage operations. Defaults to `10`.
+
+- `MAX_CONCURRENT_DOC_STORE`  
+  Maximum number of concurrent Elasticsearch/Infinity insert operations. Defaults to `3`.
+
+- `MAX_THREAD_WORKERS`  
+  Maximum number of threads in the executor's thread pool. Defaults to `0` (auto, uses Python's default). Set a fixed value (e.g., `8`) to limit thread creation.
+
+**Recommended settings for low-resource environments:**
+```env
+MAX_CONCURRENT_TASKS=2
+MAX_CONCURRENT_CHUNK_BUILDERS=1
+MAX_CONCURRENT_DOC_STORE=2
+MAX_THREAD_WORKERS=8
+DOC_BULK_SIZE=2
+EMBEDDING_BATCH_SIZE=8
+```
+
 ## 🐋 Service configuration
 
 [service_conf.yaml](./service_conf.yaml) specifies the system-level configuration for RAGFlow and is used by its API server and task executor. In a dockerized setup, this file is automatically created based on the [service_conf.yaml.template](./service_conf.yaml.template) file (replacing all environment variables by their values).

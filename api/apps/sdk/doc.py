@@ -13,6 +13,7 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 #
+import asyncio
 import datetime
 import json
 import logging
@@ -1555,7 +1556,9 @@ async def retrieval_test(tenant_id):
             chat_mdl = LLMBundle(kb.tenant_id, LLMType.CHAT)
             question += await keyword_extraction(chat_mdl, question)
 
-        ranks = settings.retriever.retrieval(
+        # Use asyncio.to_thread to avoid blocking the event loop
+        ranks = await asyncio.to_thread(
+            settings.retriever.retrieval,
             question,
             embd_mdl,
             tenant_ids,
@@ -1572,11 +1575,17 @@ async def retrieval_test(tenant_id):
         )
         if toc_enhance:
             chat_mdl = LLMBundle(kb.tenant_id, LLMType.CHAT)
-            cks = settings.retriever.retrieval_by_toc(question, ranks["chunks"], tenant_ids, chat_mdl, size)
+            cks = await asyncio.to_thread(
+                settings.retriever.retrieval_by_toc,
+                question, ranks["chunks"], tenant_ids, chat_mdl, size
+            )
             if cks:
                 ranks["chunks"] = cks
         if use_kg:
-            ck = settings.kg_retriever.retrieval(question, [k.tenant_id for k in kbs], kb_ids, embd_mdl, LLMBundle(kb.tenant_id, LLMType.CHAT))
+            ck = await asyncio.to_thread(
+                settings.kg_retriever.retrieval,
+                question, [k.tenant_id for k in kbs], kb_ids, embd_mdl, LLMBundle(kb.tenant_id, LLMType.CHAT)
+            )
             if ck["content_with_weight"]:
                 ranks["chunks"].insert(0, ck)
 

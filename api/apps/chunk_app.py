@@ -372,23 +372,31 @@ async def retrieval_test():
             _question += await keyword_extraction(chat_mdl, _question)
 
         labels = label_question(_question, [kb])
-        ranks = settings.retriever.retrieval(_question, embd_mdl, tenant_ids, kb_ids, page, size,
-                               float(req.get("similarity_threshold", 0.0)),
-                               float(req.get("vector_similarity_weight", 0.3)),
-                               top,
-                               local_doc_ids, rerank_mdl=rerank_mdl,
-                                             highlight=req.get("highlight", False),
-                               rank_feature=labels
-                               )
+        # Use asyncio.to_thread to avoid blocking the event loop
+        ranks = await asyncio.to_thread(
+            settings.retriever.retrieval,
+            _question, embd_mdl, tenant_ids, kb_ids, page, size,
+            float(req.get("similarity_threshold", 0.0)),
+            float(req.get("vector_similarity_weight", 0.3)),
+            top,
+            local_doc_ids, rerank_mdl=rerank_mdl,
+            highlight=req.get("highlight", False),
+            rank_feature=labels
+        )
         if use_kg:
-            ck = settings.kg_retriever.retrieval(_question,
-                                                   tenant_ids,
-                                                   kb_ids,
-                                                   embd_mdl,
-                                                   LLMBundle(kb.tenant_id, LLMType.CHAT))
+            ck = await asyncio.to_thread(
+                settings.kg_retriever.retrieval,
+                _question,
+                tenant_ids,
+                kb_ids,
+                embd_mdl,
+                LLMBundle(kb.tenant_id, LLMType.CHAT)
+            )
             if ck["content_with_weight"]:
                 ranks["chunks"].insert(0, ck)
-        ranks["chunks"] = settings.retriever.retrieval_by_children(ranks["chunks"], tenant_ids)
+        ranks["chunks"] = await asyncio.to_thread(
+            settings.retriever.retrieval_by_children, ranks["chunks"], tenant_ids
+        )
 
         for c in ranks["chunks"]:
             c.pop("vector", None)
