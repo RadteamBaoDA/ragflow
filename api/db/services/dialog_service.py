@@ -13,7 +13,6 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 #
-import asyncio
 import binascii
 import logging
 import re
@@ -29,6 +28,7 @@ from api.db.services.file_service import FileService
 from common.constants import LLMType, ParserType, StatusEnum
 from api.db.db_models import DB, Dialog
 from api.db.services.common_service import CommonService
+from common.async_utils import run_in_thread
 from api.db.services.document_service import DocumentService
 from api.db.services.knowledgebase_service import KnowledgebaseService
 from api.db.services.langfuse_service import TenantLangfuseService
@@ -396,8 +396,8 @@ async def async_chat(dialog, messages, stream=True, **kwargs):
                     yield think
         else:
             if embd_mdl:
-                # Use asyncio.to_thread to avoid blocking the event loop during retrieval
-                kbinfos = await asyncio.to_thread(
+                # Use run_in_thread to avoid blocking the event loop during retrieval
+                kbinfos = await run_in_thread(
                     retriever.retrieval,
                     " ".join(questions),
                     embd_mdl,
@@ -414,22 +414,22 @@ async def async_chat(dialog, messages, stream=True, **kwargs):
                     rank_feature=label_question(" ".join(questions), kbs),
                 )
                 if prompt_config.get("toc_enhance"):
-                    cks = await asyncio.to_thread(
+                    cks = await run_in_thread(
                         retriever.retrieval_by_toc,
                         " ".join(questions), kbinfos["chunks"], tenant_ids, chat_mdl, dialog.top_n
                     )
                     if cks:
                         kbinfos["chunks"] = cks
-                kbinfos["chunks"] = await asyncio.to_thread(
+                kbinfos["chunks"] = await run_in_thread(
                     retriever.retrieval_by_children, kbinfos["chunks"], tenant_ids
                 )
             if prompt_config.get("tavily_api_key"):
                 tav = Tavily(prompt_config["tavily_api_key"])
-                tav_res = await asyncio.to_thread(tav.retrieve_chunks, " ".join(questions))
+                tav_res = await run_in_thread(tav.retrieve_chunks, " ".join(questions))
                 kbinfos["chunks"].extend(tav_res["chunks"])
                 kbinfos["doc_aggs"].extend(tav_res["doc_aggs"])
             if prompt_config.get("use_kg"):
-                ck = await asyncio.to_thread(
+                ck = await run_in_thread(
                     settings.kg_retriever.retrieval,
                     " ".join(questions), tenant_ids, dialog.kb_ids, embd_mdl,
                     LLMBundle(dialog.tenant_id, LLMType.CHAT)

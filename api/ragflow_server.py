@@ -40,6 +40,7 @@ from api.db.init_data import init_web_data, init_superuser
 from common.versions import get_ragflow_version
 from common.config_utils import show_configs
 from common.mcp_tool_call_conn import shutdown_all_mcp_sessions
+from common.async_utils import shutdown_executor
 from rag.utils.redis_conn import RedisDistributedLock
 
 stop_event = threading.Event()
@@ -67,6 +68,7 @@ def update_progress():
 def signal_handler(sig, frame):
     logging.info("Received interrupt signal, shutting down...")
     shutdown_all_mcp_sessions()
+    shutdown_executor()  # Shutdown thread pool executor
     stop_event.set()
     stop_event.wait(1)
     sys.exit(0)
@@ -146,25 +148,12 @@ if __name__ == '__main__':
     # start http server
     try:
         logging.info("RAGFlow HTTP server start...")
-        if RuntimeConfig.DEBUG:
-            # Use Quart's built-in server for debug mode
-            app.run(host=settings.HOST_IP, port=settings.HOST_PORT)
-        else:
-            # Use Hypercorn for production with proper async support
-            import asyncio
-            from hypercorn.config import Config
-            from hypercorn.asyncio import serve
-
-            config = Config()
-            config.bind = [f"{settings.HOST_IP}:{settings.HOST_PORT}"]
-            # Configure worker settings for better concurrency
-            config.workers = int(os.environ.get("RAGFLOW_WORKERS", 1))
-            config.keep_alive_timeout = 600  # Match LLM timeout settings
-            config.graceful_timeout = 30
-
-            asyncio.run(serve(app, config))
+        # Quart uses asyncio event loop internally, handles concurrent requests properly
+        # Use hypercorn for production deployments with multiple workers
+        app.run(host=settings.HOST_IP, port=settings.HOST_PORT)
     except Exception:
         traceback.print_exc()
+        shutdown_executor()
         stop_event.set()
         stop_event.wait(1)
         os.kill(os.getpid(), signal.SIGKILL)

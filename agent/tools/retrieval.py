@@ -13,13 +13,13 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 #
-import asyncio
 from functools import partial
 import json
 import os
 import re
 from abc import ABC
 from agent.tools.base import ToolParamBase, ToolBase, ToolMeta
+from common.async_utils import run_in_thread
 from common.constants import LLMType
 from api.db.services.document_service import DocumentService
 from common.metadata_utils import apply_meta_data_filter
@@ -174,8 +174,8 @@ class Retrieval(ToolBase, ABC):
 
         if kbs:
             query = re.sub(r"^user[:：\s]*", "", query, flags=re.IGNORECASE)
-            # Use asyncio.to_thread to avoid blocking the event loop
-            kbinfos = await asyncio.to_thread(
+            # Use run_in_thread to avoid blocking the event loop
+            kbinfos = await run_in_thread(
                 settings.retriever.retrieval,
                 query,
                 embd_mdl,
@@ -195,7 +195,7 @@ class Retrieval(ToolBase, ABC):
 
             if self._param.toc_enhance:
                 chat_mdl = LLMBundle(self._canvas._tenant_id, LLMType.CHAT)
-                cks = await asyncio.to_thread(
+                cks = await run_in_thread(
                     settings.retriever.retrieval_by_toc,
                     query, kbinfos["chunks"], [kb.tenant_id for kb in kbs],
                     chat_mdl, self._param.top_n
@@ -204,13 +204,13 @@ class Retrieval(ToolBase, ABC):
                     return
                 if cks:
                     kbinfos["chunks"] = cks
-            kbinfos["chunks"] = await asyncio.to_thread(
+            kbinfos["chunks"] = await run_in_thread(
                 settings.retriever.retrieval_by_children,
                 kbinfos["chunks"],
                 [kb.tenant_id for kb in kbs]
             )
             if self._param.use_kg:
-                ck = await asyncio.to_thread(
+                ck = await run_in_thread(
                     settings.kg_retriever.retrieval,
                     query,
                     [kb.tenant_id for kb in kbs],
@@ -226,7 +226,7 @@ class Retrieval(ToolBase, ABC):
             kbinfos = {"chunks": [], "doc_aggs": []}
 
         if self._param.use_kg and kbs:
-            ck = await asyncio.to_thread(
+            ck = await run_in_thread(
                 settings.kg_retriever.retrieval,
                 query, [kb.tenant_id for kb in kbs], filtered_kb_ids, embd_mdl,
                 LLMBundle(kbs[0].tenant_id, LLMType.CHAT)

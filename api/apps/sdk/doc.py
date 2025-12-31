@@ -13,7 +13,6 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 #
-import asyncio
 import datetime
 import json
 import logging
@@ -36,6 +35,7 @@ from api.db.services.knowledgebase_service import KnowledgebaseService
 from api.db.services.llm_service import LLMBundle
 from api.db.services.tenant_llm_service import TenantLLMService
 from api.db.services.task_service import TaskService, queue_tasks, cancel_all_task_of
+from common.async_utils import run_in_thread
 from common.metadata_utils import meta_filter, convert_conditions
 from api.utils.api_utils import check_duplicate_ids, construct_json_result, get_error_data_result, get_parser_config, get_result, server_error_response, token_required, \
     get_request_json
@@ -1556,8 +1556,8 @@ async def retrieval_test(tenant_id):
             chat_mdl = LLMBundle(kb.tenant_id, LLMType.CHAT)
             question += await keyword_extraction(chat_mdl, question)
 
-        # Use asyncio.to_thread to avoid blocking the event loop
-        ranks = await asyncio.to_thread(
+        # Use run_in_thread to avoid blocking the event loop
+        ranks = await run_in_thread(
             settings.retriever.retrieval,
             question,
             embd_mdl,
@@ -1575,14 +1575,14 @@ async def retrieval_test(tenant_id):
         )
         if toc_enhance:
             chat_mdl = LLMBundle(kb.tenant_id, LLMType.CHAT)
-            cks = await asyncio.to_thread(
+            cks = await run_in_thread(
                 settings.retriever.retrieval_by_toc,
                 question, ranks["chunks"], tenant_ids, chat_mdl, size
             )
             if cks:
                 ranks["chunks"] = cks
         if use_kg:
-            ck = await asyncio.to_thread(
+            ck = await run_in_thread(
                 settings.kg_retriever.retrieval,
                 question, [k.tenant_id for k in kbs], kb_ids, embd_mdl, LLMBundle(kb.tenant_id, LLMType.CHAT)
             )

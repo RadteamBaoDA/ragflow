@@ -13,7 +13,6 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 #
-import asyncio
 import json
 import copy
 import re
@@ -34,6 +33,7 @@ from api.db.services.dialog_service import DialogService, async_ask, async_chat,
 from api.db.services.document_service import DocumentService
 from api.db.services.knowledgebase_service import KnowledgebaseService
 from api.db.services.llm_service import LLMBundle
+from common.async_utils import run_in_thread
 from common.metadata_utils import apply_meta_data_filter, convert_conditions, meta_filter
 from api.db.services.search_service import SearchService
 from api.db.services.user_service import UserTenantService
@@ -1112,14 +1112,14 @@ async def retrieval_test_embedded():
             _question += await keyword_extraction(chat_mdl, _question)
 
         labels = label_question(_question, [kb])
-        # Use asyncio.to_thread to avoid blocking the event loop
-        ranks = await asyncio.to_thread(
+        # Use run_in_thread to avoid blocking the event loop
+        ranks = await run_in_thread(
             settings.retriever.retrieval,
             _question, embd_mdl, tenant_ids, kb_ids, page, size, similarity_threshold, vector_similarity_weight, top,
             local_doc_ids, rerank_mdl=rerank_mdl, highlight=req.get("highlight"), rank_feature=labels
         )
         if use_kg:
-            ck = await asyncio.to_thread(
+            ck = await run_in_thread(
                 settings.kg_retriever.retrieval,
                 _question, tenant_ids, kb_ids, embd_mdl,
                 LLMBundle(kb.tenant_id, LLMType.CHAT)

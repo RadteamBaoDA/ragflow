@@ -13,7 +13,6 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 #
-import asyncio
 import logging
 
 from quart import jsonify
@@ -21,6 +20,7 @@ from quart import jsonify
 from api.db.services.document_service import DocumentService
 from api.db.services.knowledgebase_service import KnowledgebaseService
 from api.db.services.llm_service import LLMBundle
+from common.async_utils import run_in_thread
 from common.metadata_utils import meta_filter, convert_conditions
 from api.utils.api_utils import apikey_required, build_error_result, get_request_json, validate_request
 from rag.app.tag import label_question
@@ -136,8 +136,8 @@ async def retrieval(tenant_id):
             doc_ids.extend(meta_filter(metas, convert_conditions(metadata_condition), metadata_condition.get("logic", "and")))
         if not doc_ids and metadata_condition:
             doc_ids = ["-999"]
-        # Use asyncio.to_thread to avoid blocking the event loop
-        ranks = await asyncio.to_thread(
+        # Use run_in_thread to avoid blocking the event loop
+        ranks = await run_in_thread(
             settings.retriever.retrieval,
             question,
             embd_mdl,
@@ -153,7 +153,7 @@ async def retrieval(tenant_id):
         )
 
         if use_kg:
-            ck = await asyncio.to_thread(
+            ck = await run_in_thread(
                 settings.kg_retriever.retrieval,
                 question,
                 [tenant_id],
